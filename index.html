@@ -1,0 +1,1982 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Control de Productividad & Reposición WMS</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- SheetJS (XLSX) para lectura y exportación de Excel -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+  
+  <!-- Chart.js para gráficos de productividad -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+          },
+          colors: {
+            brand: {
+              50: '#eff6ff',
+              100: '#dbeafe',
+              500: '#3b82f6',
+              600: '#2563eb',
+              700: '#1d4ed8',
+              900: '#1e3a8a',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #f1f5f9;
+      color: #0f172a;
+    }
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+    .drop-active {
+      border-color: #2563eb !important;
+      background-color: #eff6ff !important;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .animate-fade {
+      animation: fadeIn 0.25s ease-out forwards;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+  <!-- Toast / Notificación flotante (Reemplaza alert()) -->
+  <div id="toastContainer" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none px-4 sm:px-0"></div>
+
+  <!-- Modal de Confirmación Personalizado -->
+  <div id="confirmModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 hidden items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 border border-slate-200 animate-fade">
+      <div class="flex items-center gap-3 text-amber-600 mb-3">
+        <div class="p-2.5 bg-amber-100 rounded-xl">
+          <i data-lucide="alert-triangle" class="w-6 h-6"></i>
+        </div>
+        <h3 id="confirmTitle" class="text-lg font-bold text-slate-900">Confirmar acción</h3>
+      </div>
+      <p id="confirmMessage" class="text-sm text-slate-600 mb-6 leading-relaxed"></p>
+      <div class="flex justify-end gap-3">
+        <button id="confirmCancelBtn" class="px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition">
+          Cancelar
+        </button>
+        <button id="confirmAcceptBtn" class="px-4 py-2.5 text-sm font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-sm transition">
+          Sí, continuar
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- HEADER SUPERIOR -->
+  <header class="bg-slate-900 text-white border-b border-slate-800 sticky top-0 z-30 shadow-md">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5">
+      <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+        
+        <!-- Logo y Título -->
+        <div class="flex items-center gap-3">
+          <div class="p-2.5 bg-blue-600 rounded-xl shadow-inner flex items-center justify-center">
+            <i data-lucide="boxes" class="w-6 h-6 text-white"></i>
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <h1 class="text-lg sm:text-xl font-extrabold tracking-tight">Control WMS · Reposición & Productividad</h1>
+              <span class="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                Tiempo Real
+              </span>
+            </div>
+            <!-- Estado de archivos cargados -->
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400 mt-0.5">
+              <span id="statusBase" class="flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-slate-500"></span>
+                Base IBLPN: <strong class="text-slate-200 font-medium">Sin cargar</strong>
+              </span>
+              <span class="hidden sm:inline text-slate-600">|</span>
+              <span id="statusRepo" class="flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-slate-500"></span>
+                Reposición: <strong class="text-slate-200 font-medium">Sin cargar</strong>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Botones de Acción Rápida -->
+        <div class="flex flex-wrap items-center gap-2">
+          <!-- Input oculto Base -->
+          <input type="file" id="inputBaseFile" accept=".xlsx,.xls,.csv" class="hidden" />
+          <button onclick="document.getElementById('inputBaseFile').click()" 
+            class="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 transition cursor-pointer">
+            <i data-lucide="database" class="w-4 h-4 text-blue-400"></i>
+            <span>1. Cargar Base (IBLPN)</span>
+          </button>
+
+          <!-- Input oculto Reposición -->
+          <input type="file" id="inputRepoFile" accept=".xlsx,.xls,.csv" class="hidden" />
+          <button onclick="document.getElementById('inputRepoFile').click()" 
+            class="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold bg-blue-600 hover:bg-blue-500 text-white shadow-sm transition cursor-pointer">
+            <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+            <span>2. Actualizar Reposición</span>
+          </button>
+
+          <!-- Exportar Excel -->
+          <button id="btnExportExcel" onclick="exportConsolidatedExcel()" disabled
+            class="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:border-slate-700 disabled:cursor-not-allowed text-white border border-transparent transition cursor-pointer">
+            <i data-lucide="file-spreadsheet" class="w-4 h-4"></i>
+            <span>Exportar Excel</span>
+          </button>
+
+          <!-- Botón Demo / Limpiar -->
+          <button onclick="loadDemoData()" title="Cargar datos simulados para probar el sistema"
+            class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 transition cursor-pointer">
+            <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
+            <span class="hidden md:inline">Demo</span>
+          </button>
+
+          <button onclick="confirmClearData()" title="Borrar todos los datos guardados"
+            class="inline-flex items-center justify-center p-2 rounded-xl text-slate-400 hover:text-rose-400 hover:bg-slate-800 border border-transparent hover:border-slate-700 transition cursor-pointer">
+            <i data-lucide="trash-2" class="w-4 h-4"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- CONTENIDO PRINCIPAL -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+
+    <!-- ZONA DE CARGA DRAG & DROP (Se colapsa cuando ya hay datos, o se puede expandir) -->
+    <section id="uploadPanel" class="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 transition-all">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h2 class="text-base font-bold text-slate-800 flex items-center gap-2">
+            <i data-lucide="upload-cloud" class="w-5 h-5 text-blue-600"></i>
+            Importación de Reportes WMS
+          </h2>
+          <p class="text-xs text-slate-500 mt-0.5">
+            Sube primero tu foto de universo pendiente (<strong>IBLPN</strong>). Quedará guardada en tu navegador para que solo vayas actualizando el reporte de <strong>Reposición</strong> durante el turno.
+          </p>
+        </div>
+        <button id="toggleUploadBtn" onclick="toggleUploadPanel()" class="hidden text-xs font-semibold text-blue-600 hover:text-blue-800 px-3 py-1.5 rounded-lg bg-blue-50">
+          Ocultar panel
+        </button>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <!-- Dropzone 1: Base IBLPN -->
+        <div id="dropZoneBase" onclick="document.getElementById('inputBaseFile').click()"
+          class="border-2 border-dashed border-slate-300 hover:border-blue-500 bg-slate-50/70 hover:bg-blue-50/40 rounded-2xl p-6 text-center cursor-pointer transition group">
+          <div class="w-12 h-12 rounded-2xl bg-blue-100 text-blue-600 flex items-center justify-center mx-auto mb-3 group-hover:scale-105 transition">
+            <i data-lucide="package-search" class="w-6 h-6"></i>
+          </div>
+          <span class="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider bg-blue-100 text-blue-700 mb-2">
+            Paso 1 · Universo Base
+          </span>
+          <h3 class="text-sm font-bold text-slate-800">Archivo Cajas WMS (iblpn*.xlsx)</h3>
+          <p class="text-xs text-slate-500 mt-1 max-w-xs mx-auto">
+            Arrastra aquí el Excel con el inventario en <strong>PUERTA</strong> y <strong>PISO</strong> a controlar.
+          </p>
+          <div id="baseBadgeInfo" class="mt-3 text-xs font-medium text-slate-600"></div>
+        </div>
+
+        <!-- Dropzone 2: Reposición -->
+        <div id="dropZoneRepo" onclick="document.getElementById('inputRepoFile').click()"
+          class="border-2 border-dashed border-slate-300 hover:border-emerald-500 bg-slate-50/70 hover:bg-emerald-50/40 rounded-2xl p-6 text-center cursor-pointer transition group">
+          <div class="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-3 group-hover:scale-105 transition">
+            <i data-lucide="activity" class="w-6 h-6"></i>
+          </div>
+          <span class="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-700 mb-2">
+            Paso 2 · Avance Periódico
+          </span>
+          <h3 class="text-sm font-bold text-slate-800">Reporte de Reposición (Reposición_Reponer*.xlsx)</h3>
+          <p class="text-xs text-slate-500 mt-1 max-w-xs mx-auto">
+            Arrastra aquí cada corte del reporte de movimientos (<code class="text-[11px] bg-slate-200 px-1 rounded">RF_ALMACENAR</code>, <code class="text-[11px] bg-slate-200 px-1 rounded">RF_REPONER</code>).
+          </p>
+          <div id="repoBadgeInfo" class="mt-3 text-xs font-medium text-slate-600"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ESTADO VACÍO INICIAL -->
+    <section id="emptyState" class="bg-white rounded-2xl border border-slate-200 p-12 text-center shadow-xs">
+      <div class="w-16 h-16 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-4">
+        <i data-lucide="bar-chart-3" class="w-8 h-8"></i>
+      </div>
+      <h3 class="text-lg font-bold text-slate-800">Aún no hay datos cargados</h3>
+      <p class="text-sm text-slate-500 max-w-md mx-auto mt-1 mb-6">
+        Sube tu archivo <strong>Base IBLPN</strong> y/o tu reporte de <strong>Reposición</strong> arriba para visualizar automáticamente el avance de cajas y la productividad por operario.
+      </p>
+      <button onclick="loadDemoData()" class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold bg-slate-900 hover:bg-slate-800 text-white transition cursor-pointer">
+        <i data-lucide="play-circle" class="w-4 h-4 text-amber-400"></i>
+        Cargar ejemplo de demostración
+      </button>
+    </section>
+
+    <!-- DASHBOARD DE KPIs Y PESTAÑAS (Oculto hasta que haya datos) -->
+    <div id="dashboardContent" class="hidden space-y-6 animate-fade">
+
+      <!-- TARJETAS KPI PRINCIPALES -->
+      <section class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        
+        <!-- KPI 1: Avance General Base -->
+        <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs flex flex-col justify-between">
+          <div class="flex items-start justify-between">
+            <div>
+              <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Avance Base IBLPN</p>
+              <div class="flex items-baseline gap-2 mt-1.5">
+                <h3 id="kpiPctAvance" class="text-3xl font-extrabold text-slate-900">0%</h3>
+                <span id="kpiAtendidosRatio" class="text-xs font-semibold text-slate-500">0 / 0 LPNs</span>
+              </div>
+            </div>
+            <div class="p-2.5 rounded-xl bg-blue-50 text-blue-600">
+              <i data-lucide="pie-chart" class="w-5 h-5"></i>
+            </div>
+          </div>
+          <div class="mt-4">
+            <div class="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+              <div id="kpiProgressBar" class="h-full bg-blue-600 rounded-full transition-all duration-500" style="width: 0%"></div>
+            </div>
+            <div class="flex justify-between text-[11px] text-slate-500 mt-1.5">
+              <span id="kpiTotalUnidadesBase">0 un. en base</span>
+              <span id="kpiAdicionalesBadge" class="text-indigo-600 font-semibold hidden">+0 LPN fuera de base</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- KPI 2: Desglose Atendidos (Subidos vs Consumidos) -->
+        <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs flex flex-col justify-between">
+          <div class="flex items-start justify-between">
+            <div>
+              <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">LPNs Atendidos (Base)</p>
+              <h3 id="kpiTotalAtendidos" class="text-3xl font-extrabold text-emerald-600 mt-1.5">0</h3>
+            </div>
+            <div class="p-2.5 rounded-xl bg-emerald-50 text-emerald-600">
+              <i data-lucide="check-circle-2" class="w-5 h-5"></i>
+            </div>
+          </div>
+          <div class="grid grid-cols-3 gap-1.5 mt-4 pt-3 border-t border-slate-100 text-center">
+            <div class="bg-indigo-50/70 rounded-lg p-1.5">
+              <span class="block text-[10px] font-semibold text-indigo-600 uppercase">Subido TDA</span>
+              <span id="kpiSubidosTDA" class="text-sm font-bold text-slate-800">0</span>
+            </div>
+            <div class="bg-emerald-50/70 rounded-lg p-1.5">
+              <span class="block text-[10px] font-semibold text-emerald-700 uppercase">Cons. Total</span>
+              <span id="kpiConsumidosTotal" class="text-sm font-bold text-slate-800">0</span>
+            </div>
+            <div class="bg-amber-50/70 rounded-lg p-1.5">
+              <span class="block text-[10px] font-semibold text-amber-700 uppercase">Parcial</span>
+              <span id="kpiConsumidosParcial" class="text-sm font-bold text-slate-800">0</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- KPI 3: Pendientes en Almacén (Puerta vs Piso) -->
+        <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs flex flex-col justify-between">
+          <div class="flex items-start justify-between">
+            <div>
+              <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Pendientes por Atender</p>
+              <div class="flex items-baseline gap-2 mt-1.5">
+                <h3 id="kpiPendientesTotal" class="text-3xl font-extrabold text-rose-600">0</h3>
+                <span id="kpiPendientesUnidades" class="text-xs font-semibold text-slate-500">(0 un.)</span>
+              </div>
+            </div>
+            <div class="p-2.5 rounded-xl bg-rose-50 text-rose-600">
+              <i data-lucide="clock" class="w-5 h-5"></i>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-2 mt-4 pt-3 border-t border-slate-100">
+            <div class="flex items-center justify-between bg-slate-50 px-2.5 py-1.5 rounded-lg">
+              <span class="text-xs font-semibold text-slate-600">PUERTA</span>
+              <div class="text-right">
+                <span id="kpiPendPuerta" class="text-xs font-bold text-slate-900 block">0 LPN</span>
+                <span id="kpiPendPuertaUn" class="text-[10px] text-slate-500">0 un.</span>
+              </div>
+            </div>
+            <div class="flex items-center justify-between bg-slate-50 px-2.5 py-1.5 rounded-lg">
+              <span class="text-xs font-semibold text-slate-600">PISO</span>
+              <div class="text-right">
+                <span id="kpiPendPiso" class="text-xs font-bold text-slate-900 block">0 LPN</span>
+                <span id="kpiPendPisoUn" class="text-[10px] text-slate-500">0 un.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- KPI 4: Productividad Global del Equipo -->
+        <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs flex flex-col justify-between">
+          <div class="flex items-start justify-between">
+            <div>
+              <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Producción Total Equipo</p>
+              <div class="flex items-baseline gap-2 mt-1.5">
+                <h3 id="kpiTotalLPNMovidos" class="text-3xl font-extrabold text-slate-900">0</h3>
+                <span class="text-xs font-semibold text-slate-500">LPNs gest.</span>
+              </div>
+            </div>
+            <div class="p-2.5 rounded-xl bg-amber-50 text-amber-600">
+              <i data-lucide="zap" class="w-5 h-5"></i>
+            </div>
+          </div>
+          <div class="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
+            <div>
+              <span class="text-slate-500 block">Unidades movidas</span>
+              <strong id="kpiTotalUnidadesMovidas" class="text-sm font-bold text-slate-800">0 un.</strong>
+            </div>
+            <div class="text-right">
+              <span class="text-slate-500 block">Operarios activos</span>
+              <strong id="kpiTotalUsuarios" class="text-sm font-bold text-blue-600">0 usuarios</strong>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- NAVEGACIÓN POR PESTAÑAS -->
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+        <div class="border-b border-slate-200 px-4 sm:px-6 bg-slate-50/60 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <nav class="flex overflow-x-auto gap-1 py-2" aria-label="Tabs">
+            <button onclick="switchTab('usuarios')" id="tab-usuarios"
+              class="tab-btn active flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap transition cursor-pointer bg-blue-600 text-white shadow-xs">
+              <i data-lucide="users" class="w-4 h-4"></i>
+              <span>1. Productividad por Usuario</span>
+            </button>
+
+            <button onclick="switchTab('base')" id="tab-base"
+              class="tab-btn flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold whitespace-nowrap transition cursor-pointer text-slate-600 hover:bg-slate-200/70">
+              <i data-lucide="box" class="w-4 h-4"></i>
+              <span>2. Control Base IBLPN</span>
+              <span id="badgeCountBase" class="px-2 py-0.5 text-[11px] rounded-full bg-slate-200 text-slate-700 font-bold">0</span>
+            </button>
+
+            <button onclick="switchTab('jerarquia')" id="tab-jerarquia"
+              class="tab-btn flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold whitespace-nowrap transition cursor-pointer text-slate-600 hover:bg-slate-200/70">
+              <i data-lucide="layers" class="w-4 h-4"></i>
+              <span>3. Pendientes por Jerarquía</span>
+            </button>
+
+            <button onclick="switchTab('bitacora')" id="tab-bitacora"
+              class="tab-btn flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold whitespace-nowrap transition cursor-pointer text-slate-600 hover:bg-slate-200/70">
+              <i data-lucide="list-ordered" class="w-4 h-4"></i>
+              <span>4. Bitácora Reposición</span>
+              <span id="badgeCountMovs" class="px-2 py-0.5 text-[11px] rounded-full bg-slate-200 text-slate-700 font-bold">0</span>
+            </button>
+          </nav>
+
+          <button onclick="toggleUploadPanel()" class="text-xs font-medium text-slate-500 hover:text-blue-600 py-2 flex items-center gap-1 self-end sm:self-center cursor-pointer">
+            <i data-lucide="folder-up" class="w-3.5 h-3.5"></i>
+            <span>Panel de archivos</span>
+          </button>
+        </div>
+
+        <!-- ========================================================= -->
+        <!-- PESTAÑA 1: PRODUCTIVIDAD POR USUARIO                      -->
+        <!-- ========================================================= -->
+        <div id="view-usuarios" class="tab-view p-5 sm:p-6 space-y-6">
+          
+          <!-- Filtro y Meta configurable -->
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200/80">
+            <div>
+              <h3 class="text-sm font-bold text-slate-800">Ranking de Productividad del Equipo</h3>
+              <p class="text-xs text-slate-500">Contabiliza LPNs únicos gestionados en <code class="bg-white px-1 border rounded">RF_ALMACENAR</code> (Subida a TDA) y <code class="bg-white px-1 border rounded">RF_REPONER</code> (Consumo/División).</p>
+            </div>
+            <div class="flex flex-wrap items-center gap-3">
+              <div class="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200">
+                <label for="metaLpnHora" class="text-xs font-semibold text-slate-600">Meta LPN/hora:</label>
+                <input type="number" id="metaLpnHora" value="15" min="1" max="500" onchange="renderUsersTab()"
+                  class="w-16 text-xs font-bold text-blue-600 border border-slate-200 rounded-lg px-2 py-1 text-center focus:outline-none focus:border-blue-500" />
+              </div>
+              <input type="text" id="searchUser" oninput="renderUsersTab()" placeholder="Buscar usuario..."
+                class="text-xs bg-white border border-slate-200 rounded-xl px-3 py-2 w-44 focus:outline-none focus:border-blue-500" />
+            </div>
+          </div>
+
+          <!-- Gráfico Comparativo -->
+          <div id="chartWrapper" class="bg-white border border-slate-200 rounded-2xl p-4">
+            <div class="flex items-center justify-between mb-2">
+              <h4 class="text-xs font-bold uppercase tracking-wider text-slate-500">Comparativa de LPNs Gestionados por Operario</h4>
+              <div class="flex items-center gap-3 text-xs">
+                <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-xs bg-indigo-500"></span>Subidos TDA</span>
+                <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-xs bg-emerald-500"></span>Repuestos / Consumidos</span>
+              </div>
+            </div>
+            <div class="h-64 w-full relative">
+              <canvas id="usersChart"></canvas>
+            </div>
+          </div>
+
+          <!-- Tabla Ranking Usuarios -->
+          <div class="overflow-x-auto border border-slate-200 rounded-2xl">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="bg-slate-100/80 text-[11px] font-bold uppercase tracking-wider text-slate-600 border-b border-slate-200">
+                  <th class="py-3 px-4 text-center w-14">#</th>
+                  <th class="py-3 px-4">Usuario WMS</th>
+                  <th class="py-3 px-4 text-center">Subidos TDA<br><span class="text-[10px] font-normal text-slate-400">(RF_ALMACENAR)</span></th>
+                  <th class="py-3 px-4 text-center">Consumo Total<br><span class="text-[10px] font-normal text-slate-400">(Agotados)</span></th>
+                  <th class="py-3 px-4 text-center">Consumo Parcial<br><span class="text-[10px] font-normal text-slate-400">(Divididos)</span></th>
+                  <th class="py-3 px-4 text-center bg-blue-50/50 text-blue-900">Total LPNs<br>Trabajados</th>
+                  <th class="py-3 px-4 text-right">Unidades<br>Movidas</th>
+                  <th class="py-3 px-4 text-center">Primera / Última<br>Actividad</th>
+                  <th class="py-3 px-4 text-center">Tiempo<br>Activo</th>
+                  <th class="py-3 px-4 text-center">Ritmo<br>(LPN / hr)</th>
+                  <th class="py-3 px-4 text-center">Semáforo</th>
+                </tr>
+              </thead>
+              <tbody id="usersTableBody" class="divide-y divide-slate-100 text-xs">
+                <!-- Renderizado dinámico -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- ========================================================= -->
+        <!-- PESTAÑA 2: CONTROL DE BASE IBLPN (CAJA POR CAJA)           -->
+        <!-- ========================================================= -->
+        <div id="view-base" class="tab-view hidden p-5 sm:p-6 space-y-4">
+          
+          <!-- Barra de Filtros -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
+            <div class="lg:col-span-2">
+              <label class="block text-[11px] font-bold text-slate-500 uppercase mb-1">Buscar LPN / SKU / Artículo</label>
+              <div class="relative">
+                <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-2.5"></i>
+                <input type="text" id="filterBaseSearch" oninput="resetBasePageAndRender()" placeholder="Ej. C404..., 20058..., descripción"
+                  class="w-full pl-9 pr-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:border-blue-500" />
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-[11px] font-bold text-slate-500 uppercase mb-1">Estado Actual</label>
+              <select id="filterBaseEstado" onchange="resetBasePageAndRender()"
+                class="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:border-blue-500 font-medium">
+                <option value="ALL">Todos los estados</option>
+                <option value="PENDIENTE">🔴 Pendiente</option>
+                <option value="ATENDIDO">✅ Todos los Atendidos</option>
+                <option value="SUBIDO_TDA">🔵 Subido / Ubicado TDA</option>
+                <option value="CONSUMIDO_TOTAL">🟢 Consumido Total (0 un.)</option>
+                <option value="CONSUMO_PARCIAL">🟡 Consumo Parcial / Dividido</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="block text-[11px] font-bold text-slate-500 uppercase mb-1">Zona Inicial</label>
+              <select id="filterBaseZona" onchange="resetBasePageAndRender()"
+                class="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:border-blue-500 font-medium">
+                <option value="ALL">PUERTA y PISO</option>
+                <option value="PUERTA">Solo PUERTA</option>
+                <option value="PISO">Solo PISO</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="block text-[11px] font-bold text-slate-500 uppercase mb-1">Jerarquía 2</label>
+              <select id="filterBaseJerarquia" onchange="resetBasePageAndRender()"
+                class="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:border-blue-500 font-medium">
+                <option value="ALL">Todas las familias</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="block text-[11px] font-bold text-slate-500 uppercase mb-1">Usuario Modif.</label>
+              <select id="filterBaseUsuario" onchange="resetBasePageAndRender()"
+                class="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:border-blue-500 font-medium">
+                <option value="ALL">Todos los usuarios</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Resumen de resultados filtrados -->
+          <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 px-1">
+            <span id="baseFilterSummary">Mostrando 0 LPNs</span>
+            <div class="flex items-center gap-2">
+              <span>Filas por página:</span>
+              <select id="basePageSize" onchange="resetBasePageAndRender()" class="border border-slate-200 rounded-lg px-2 py-1 bg-white text-slate-700 font-semibold">
+                <option value="25">25</option>
+                <option value="50" selected>50</option>
+                <option value="100">100</option>
+                <option value="250">250</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Tabla Base IBLPN -->
+          <div class="overflow-x-auto border border-slate-200 rounded-2xl">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="bg-slate-100/80 text-[11px] font-bold uppercase tracking-wider text-slate-600 border-b border-slate-200">
+                  <th class="py-3 px-4">Número de LPN</th>
+                  <th class="py-3 px-4">Estado Control</th>
+                  <th class="py-3 px-4">SKU / Artículo</th>
+                  <th class="py-3 px-4">Jerarquía 2</th>
+                  <th class="py-3 px-4">Ubicación Inicial <span class="text-slate-400">→ Final</span></th>
+                  <th class="py-3 px-4 text-right">Un. Base</th>
+                  <th class="py-3 px-4 text-right">Un. Movidas</th>
+                  <th class="py-3 px-4 text-right">Saldo Rest.</th>
+                  <th class="py-3 px-4">Usuario Resp.</th>
+                  <th class="py-3 px-4">Hora Actividad</th>
+                </tr>
+              </thead>
+              <tbody id="baseTableBody" class="divide-y divide-slate-100 text-xs">
+                <!-- Renderizado dinámico -->
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Paginación -->
+          <div class="flex items-center justify-between pt-2">
+            <span id="basePageInfo" class="text-xs text-slate-500 font-medium">Página 1 de 1</span>
+            <div class="flex items-center gap-2">
+              <button id="btnPrevBase" onclick="changeBasePage(-1)" class="px-3 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 cursor-pointer">
+                Anterior
+              </button>
+              <button id="btnNextBase" onclick="changeBasePage(1)" class="px-3 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 cursor-pointer">
+                Siguiente
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ========================================================= -->
+        <!-- PESTAÑA 3: PENDIENTES POR JERARQUÍA / FAMILIA             -->
+        <!-- ========================================================= -->
+        <div id="view-jerarquia" class="tab-view hidden p-5 sm:p-6 space-y-4">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h3 class="text-sm font-bold text-slate-800">Avance y Pendientes por Jerarquía de Artículo 2</h3>
+              <p class="text-xs text-slate-500">Identifica rápidamente qué familias tienen mayor acumulación pendiente en PUERTA o PISO.</p>
+            </div>
+          </div>
+
+          <div class="overflow-x-auto border border-slate-200 rounded-2xl">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="bg-slate-100/80 text-[11px] font-bold uppercase tracking-wider text-slate-600 border-b border-slate-200">
+                  <th class="py-3 px-4">Jerarquía de Artículo 2</th>
+                  <th class="py-3 px-4 text-center">Total LPNs</th>
+                  <th class="py-3 px-4 text-center text-emerald-700">Atendidos</th>
+                  <th class="py-3 px-4 text-center text-rose-700">Pendientes Total</th>
+                  <th class="py-3 px-4 text-center">Pend. PUERTA</th>
+                  <th class="py-3 px-4 text-center">Pend. PISO</th>
+                  <th class="py-3 px-4 text-right">Unidades Pendientes</th>
+                  <th class="py-3 px-4 w-48">% Avance</th>
+                </tr>
+              </thead>
+              <tbody id="jerarquiaTableBody" class="divide-y divide-slate-100 text-xs">
+                <!-- Renderizado dinámico -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- ========================================================= -->
+        <!-- PESTAÑA 4: BITÁCORA DE MOVIMIENTOS (REPOSICIÓN)           -->
+        <!-- ========================================================= -->
+        <div id="view-bitacora" class="tab-view hidden p-5 sm:p-6 space-y-4">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
+            <div>
+              <h3 class="text-sm font-bold text-slate-800">Detalle de Movimientos Procesados (Reporte Reposición)</h3>
+              <p class="text-xs text-slate-500">Muestra los registros válidos con Nro LPN extraídos del reporte de actividad.</p>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <input type="text" id="filterMovSearch" oninput="renderBitacoraTab()" placeholder="Buscar Nro LPN o SKU..."
+                class="text-xs bg-white border border-slate-200 rounded-xl px-3 py-2 w-44 focus:outline-none focus:border-blue-500" />
+              
+              <select id="filterMovPantalla" onchange="renderBitacoraTab()"
+                class="text-xs bg-white border border-slate-200 rounded-xl px-3 py-2 font-medium focus:outline-none focus:border-blue-500">
+                <option value="ALL">Todas las pantallas</option>
+                <option value="RF_ALMACENAR">RF_ALMACENAR</option>
+                <option value="RF_REPONER_PUERTA">RF_REPONER_PUERTA</option>
+                <option value="RF_REPONER_RESERVA">RF_REPONER_RESERVA</option>
+              </select>
+
+              <select id="filterMovUsuario" onchange="renderBitacoraTab()"
+                class="text-xs bg-white border border-slate-200 rounded-xl px-3 py-2 font-medium focus:outline-none focus:border-blue-500">
+                <option value="ALL">Todos los usuarios</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="overflow-x-auto border border-slate-200 rounded-2xl">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="bg-slate-100/80 text-[11px] font-bold uppercase tracking-wider text-slate-600 border-b border-slate-200">
+                  <th class="py-3 px-4">Fecha Actividad</th>
+                  <th class="py-3 px-4">Usuario</th>
+                  <th class="py-3 px-4">Pantalla WMS</th>
+                  <th class="py-3 px-4">Nro LPN</th>
+                  <th class="py-3 px-4">SKU</th>
+                  <th class="py-3 px-4">Tipo Acción</th>
+                  <th class="py-3 px-4 text-right">Cant. Orig.</th>
+                  <th class="py-3 px-4 text-right">Cant. Ajustada</th>
+                  <th class="py-3 px-4">Ubic. Inicial → Final</th>
+                  <th class="py-3 px-4 text-center">En Base</th>
+                </tr>
+              </thead>
+              <tbody id="bitacoraTableBody" class="divide-y divide-slate-100 text-xs">
+                <!-- Renderizado dinámico -->
+              </tbody>
+            </table>
+          </div>
+          <p id="bitacoraFooterNote" class="text-xs text-slate-400 text-right"></p>
+        </div>
+
+      </div>
+    </div>
+  </main>
+
+  <!-- FOOTER -->
+  <footer class="bg-white border-t border-slate-200 py-3.5 px-4 text-center text-xs text-slate-400 mt-auto">
+    Sistema Local de Control WMS · Los datos se procesan 100% en tu navegador y se guardan automáticamente en este equipo.
+  </footer>
+
+  <!-- ===================================================================== -->
+  <!-- LÓGICA DE PROCESAMIENTO, CRUCE WMS, GRÁFICOS Y EXPORTACIÓN EXCEL      -->
+  <!-- ===================================================================== -->
+  <script>
+    // =========================================================================
+    // 1. ESTADO GLOBAL Y PERSISTENCIA (localStorage)
+    // =========================================================================
+    const STORAGE_KEY_BASE = 'wms_control_base_v1';
+    const STORAGE_KEY_REPO = 'wms_control_repo_v1';
+
+    let state = {
+      baseMeta: null,       // { fileName, loadedAt, rawRowsCount }
+      baseRecords: [],      // Filas normalizadas de IBLPN
+      repoMeta: null,       // { fileName, loadedAt, rawRowsCount }
+      repoRecords: [],      // Filas normalizadas de Reposición
+      // Resultados calculados del cruce:
+      consolidatedLPNs: [], // Lista maestra de LPNs de Base con su estado cruzado
+      extraLPNMovements: [],// LPNs movidos en Reposición que no estaban en la Base
+      validMovements: [],   // Movimientos válidos filtrados
+      userStats: [],        // Ranking de productividad por usuario
+      hierarchyStats: [],   // Agrupación por Jerarquía 2
+      kpis: {}              // Totales globales
+    };
+
+    let baseCurrentPage = 1;
+    let usersChartInstance = null;
+
+    // =========================================================================
+    // 2. INICIALIZACIÓN Y EVENTOS DRAG & DROP
+    // =========================================================================
+    window.addEventListener('DOMContentLoaded', () => {
+      lucide.createIcons();
+      setupFileInputs();
+      loadFromStorage();
+    });
+
+    function setupFileInputs() {
+      const inputBase = document.getElementById('inputBaseFile');
+      const inputRepo = document.getElementById('inputRepoFile');
+      const dropBase = document.getElementById('dropZoneBase');
+      const dropRepo = document.getElementById('dropZoneRepo');
+
+      inputBase.addEventListener('change', (e) => {
+        if (e.target.files[0]) handleFileUpload(e.target.files[0], 'BASE');
+        e.target.value = '';
+      });
+
+      inputRepo.addEventListener('change', (e) => {
+        if (e.target.files[0]) handleFileUpload(e.target.files[0], 'REPO');
+        e.target.value = '';
+      });
+
+      // Drag & Drop handlers
+      [
+        { el: dropBase, type: 'BASE' },
+        { el: dropRepo, type: 'REPO' }
+      ].forEach(({ el, type }) => {
+        el.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          el.classList.add('drop-active');
+        });
+        el.addEventListener('dragleave', () => {
+          el.classList.remove('drop-active');
+        });
+        el.addEventListener('drop', (e) => {
+          e.preventDefault();
+          el.classList.remove('drop-active');
+          if (e.dataTransfer.files[0]) {
+            handleFileUpload(e.dataTransfer.files[0], type);
+          }
+        });
+      });
+    }
+
+    // =========================================================================
+    // 3. LECTURA Y NORMALIZACIÓN DE EXCEL (Manejo de acentos y formatos WMS)
+    // =========================================================================
+    function normalizeHeader(str) {
+      if (!str) return '';
+      return String(str)
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '') // Quita tildes
+        .replace(/[^a-z0-9]/g, '');      // Solo alfanumérico
+    }
+
+    function getColValue(row, normalizedMap, candidates, defaultVal = '') {
+      for (const cand of candidates) {
+        const realKey = normalizedMap[cand];
+        if (realKey !== undefined && row[realKey] !== undefined && row[realKey] !== null) {
+          return row[realKey];
+        }
+      }
+      return defaultVal;
+    }
+
+    function parseNumber(val) {
+      if (typeof val === 'number') return isNaN(val) ? 0 : val;
+      if (!val) return 0;
+      const cleaned = String(val).replace(/,/g, '').trim();
+      const num = parseFloat(cleaned);
+      return isNaN(num) ? 0 : num;
+    }
+
+    function parseWMSDate(val) {
+      if (!val) return null;
+      if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
+      
+      // Número serial de Excel
+      if (typeof val === 'number') {
+        const utc_days = Math.floor(val - 25569);
+        const utc_value = utc_days * 86400;
+        const date_info = new Date(utc_value * 1000);
+        const fractional_day = val - Math.floor(val) + 0.0000001;
+        let total_seconds = Math.floor(86400 * fractional_day);
+        const seconds = total_seconds % 60;
+        total_seconds -= seconds;
+        const hours = Math.floor(total_seconds / (60 * 60));
+        const minutes = Math.floor(total_seconds / 60) % 60;
+        return new Date(date_info.getUTCFullYear(), date_info.getUTCMonth(), date_info.getUTCDate(), hours, minutes, seconds);
+      }
+
+      const str = String(val).trim();
+      // Formato DD/MM/YYYY HH:mm:ss o DD-MM-YYYY HH:mm
+      const matchDMY = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+      if (matchDMY) {
+        let day = parseInt(matchDMY[1], 10);
+        let month = parseInt(matchDMY[2], 10) - 1;
+        let year = parseInt(matchDMY[3], 10);
+        if (year < 100) year += 2000;
+        const hour = parseInt(matchDMY[4] || '0', 10);
+        const min = parseInt(matchDMY[5] || '0', 10);
+        const sec = parseInt(matchDMY[6] || '0', 10);
+        return new Date(year, month, day, hour, min, sec);
+      }
+
+      const parsed = new Date(str);
+      return isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    function formatTimeShort(dateObj) {
+      if (!dateObj || !(dateObj instanceof Date) || isNaN(dateObj.getTime())) return '-';
+      const hh = String(dateObj.getHours()).padStart(2, '0');
+      const mm = String(dateObj.getMinutes()).padStart(2, '0');
+      return `${hh}:${mm}`;
+    }
+
+    function formatDateTimeFull(dateObj) {
+      if (!dateObj || !(dateObj instanceof Date) || isNaN(dateObj.getTime())) return '-';
+      const dd = String(dateObj.getDate()).padStart(2, '0');
+      const mo = String(dateObj.getMonth() + 1).padStart(2, '0');
+      const hh = String(dateObj.getHours()).padStart(2, '0');
+      const mm = String(dateObj.getMinutes()).padStart(2, '0');
+      return `${dd}/${mo} ${hh}:${mm}`;
+    }
+
+    function handleFileUpload(file, type) {
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const data = new Uint8Array(e.target.result);
+          const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+          const firstSheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[firstSheetName];
+          const jsonRows = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+
+          if (!jsonRows || jsonRows.length === 0) {
+            showToast('El archivo Excel está vacío o no tiene filas legibles.', 'error');
+            return;
+          }
+
+          // Construir mapa de encabezados normalizados
+          const sampleKeys = Object.keys(jsonRows[0]);
+          const normalizedMap = {};
+          sampleKeys.forEach(k => {
+            normalizedMap[normalizeHeader(k)] = k;
+          });
+
+          const nowStr = new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }) + ' · ' + new Date().toLocaleDateString('es-PE');
+
+          if (type === 'BASE') {
+            // Validar que tenga columna de LPN
+            if (!normalizedMap['numerodelpn'] && !normalizedMap['nrolpn'] && !normalizedMap['lpn']) {
+              showToast('No se encontró la columna "Número de LPN". Verifica que sea el reporte IBLPN.', 'error');
+              return;
+            }
+
+            const parsedBase = jsonRows.map(row => {
+              const lpn = String(getColValue(row, normalizedMap, ['numerodelpn', 'nrolpn', 'lpn'])).trim().toUpperCase();
+              const ubicacion = String(getColValue(row, normalizedMap, ['ubicacion', 'ubicacionactual'])).trim().toUpperCase();
+              let zona = 'OTRO';
+              if (ubicacion.includes('PUERTA')) zona = 'PUERTA';
+              else if (ubicacion.includes('PISO')) zona = 'PISO';
+
+              return {
+                lpn,
+                estadoWMS: String(getColValue(row, normalizedMap, ['estado'])).trim(),
+                sku: String(getColValue(row, normalizedMap, ['sku', 'codigoarticulo'])).trim(),
+                descripcion: String(getColValue(row, normalizedMap, ['descripciondearticulo', 'descripcion', 'articulo'])).trim(),
+                unActual: parseNumber(getColValue(row, normalizedMap, ['unactual', 'unidades', 'cantidad'], 0)),
+                ubicacion,
+                zona,
+                pale: String(getColValue(row, normalizedMap, ['numerodepale', 'pale'])).trim(),
+                usuarioModifBase: String(getColValue(row, normalizedMap, ['usuariodemodificacion', 'usuario'])).trim(),
+                jerarquia2: String(getColValue(row, normalizedMap, ['jerarquiadearticulo2', 'jerarquia2', 'jerarquia'], 'SIN JERARQUÍA')).trim() || 'SIN JERARQUÍA'
+              };
+            }).filter(r => r.lpn !== '');
+
+            state.baseRecords = parsedBase;
+            state.baseMeta = {
+              fileName: file.name,
+              loadedAt: nowStr,
+              rawRowsCount: parsedBase.length
+            };
+
+            saveToStorage();
+            recalculateAll();
+            showToast(`Base IBLPN cargada: ${parsedBase.length} líneas procesadas.`, 'success');
+
+          } else if (type === 'REPO') {
+            // Validar columnas de Reposición
+            if (!normalizedMap['pantalla'] && !normalizedMap['usuario']) {
+              showToast('No se encontraron las columnas "Pantalla" o "Usuario". Verifica que sea el reporte de Reposición.', 'error');
+              return;
+            }
+
+            const parsedRepo = jsonRows.map(row => {
+              const rawDate = getColValue(row, normalizedMap, ['fechadeactividad', 'fecha', 'hora']);
+              const parsedDate = parseWMSDate(rawDate);
+              return {
+                tienda: String(getColValue(row, normalizedMap, ['tienda'])).trim(),
+                pantalla: String(getColValue(row, normalizedMap, ['pantalla'])).trim().toUpperCase(),
+                lpn: String(getColValue(row, normalizedMap, ['nrolpn', 'numerodelpn', 'lpn'])).trim().toUpperCase(),
+                sku: String(getColValue(row, normalizedMap, ['sku'])).trim(),
+                cantOriginal: parseNumber(getColValue(row, normalizedMap, ['cantidadoriginal', 'cantoriginal'], 0)),
+                cantAjustada: parseNumber(getColValue(row, normalizedMap, ['cantidadajustada', 'cantajustada'], 0)),
+                ubicInicial: String(getColValue(row, normalizedMap, ['ubicacioninicial', 'ubicinicial'])).trim().toUpperCase(),
+                ubicFinal: String(getColValue(row, normalizedMap, ['ubicacionfinal', 'ubicfinal'])).trim().toUpperCase(),
+                fechaRaw: String(rawDate).trim(),
+                timestamp: parsedDate ? parsedDate.getTime() : null,
+                usuario: String(getColValue(row, normalizedMap, ['usuario', 'usuariodemodificacion'])).trim().toUpperCase()
+              };
+            });
+
+            state.repoRecords = parsedRepo;
+            state.repoMeta = {
+              fileName: file.name,
+              loadedAt: nowStr,
+              rawRowsCount: parsedRepo.length
+            };
+
+            saveToStorage();
+            recalculateAll();
+            showToast(`Reporte de Reposición actualizado (${parsedRepo.length} registros).`, 'success');
+          }
+        } catch (err) {
+          console.error(err);
+          showToast('Error al leer el archivo Excel. Asegúrate de que no esté corrupto.', 'error');
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    // =========================================================================
+    // 4. MOTOR DE CRUCE Y PRODUCTIVIDAD WMS
+    // =========================================================================
+    function recalculateAll() {
+      const hasBase = state.baseRecords.length > 0;
+      const hasRepo = state.repoRecords.length > 0;
+
+      updateHeaderStatus();
+
+      if (!hasBase && !hasRepo) {
+        document.getElementById('emptyState').classList.remove('hidden');
+        document.getElementById('dashboardContent').classList.add('hidden');
+        document.getElementById('btnExportExcel').disabled = true;
+        return;
+      }
+
+      document.getElementById('emptyState').classList.add('hidden');
+      document.getElementById('dashboardContent').classList.remove('hidden');
+      document.getElementById('btnExportExcel').disabled = false;
+
+      // Colapsar panel de carga automáticamente si ambos archivos ya están cargados
+      if (hasBase && hasRepo) {
+        document.getElementById('uploadPanel').classList.add('hidden');
+      }
+
+      // -----------------------------------------------------------------------
+      // PASO A: Agrupar Universo Base por LPN (un LPN puede tener varios SKUs)
+      // -----------------------------------------------------------------------
+      const baseMap = new Map();
+      state.baseRecords.forEach(row => {
+        if (!baseMap.has(row.lpn)) {
+          baseMap.set(row.lpn, {
+            lpn: row.lpn,
+            skus: new Set(),
+            descripciones: new Set(),
+            jerarquias: new Set(),
+            unActualTotal: 0,
+            ubicacionInicial: row.ubicacion,
+            zonaInicial: row.zona,
+            estadoWMS: row.estadoWMS,
+            // Campos que se llenarán al cruzar con Reposición:
+            statusControl: 'PENDIENTE', // PENDIENTE | SUBIDO_TDA | CONSUMIDO_TOTAL | CONSUMO_PARCIAL
+            ubicacionFinal: '',
+            unidadesConsumidas: 0,
+            unidadesSubidasTDA: 0,
+            saldoRestante: 0,
+            usuariosSet: new Set(),
+            ultimoUsuario: '',
+            ultimaActividadTs: null,
+            movimientos: []
+          });
+        }
+        const entry = baseMap.get(row.lpn);
+        if (row.sku) entry.skus.add(row.sku);
+        if (row.descripcion) entry.descripciones.add(row.descripcion);
+        if (row.jerarquia2) entry.jerarquias.add(row.jerarquia2);
+        entry.unActualTotal += row.unActual;
+        entry.saldoRestante = entry.unActualTotal;
+      });
+
+      // -----------------------------------------------------------------------
+      // PASO B: Procesar movimientos válidos de Reposición
+      // -----------------------------------------------------------------------
+      // Ignoramos filas espejo sin Nro LPN (las que solo suman en TDA-HOME-TOTAL-001)
+      const validMovs = [];
+      const repoByLPN = new Map();
+
+      state.repoRecords.forEach(mov => {
+        if (!mov.lpn) return; // Fila espejo sin LPN
+
+        const isAlmacenar = mov.pantalla.includes('ALMACENAR');
+        const isReponer = mov.pantalla.includes('REPONER');
+
+        // Detectar si RF_ALMACENAR movió hacia tienda/rack (TDA, NAV-TDA, etc.) o fuera de PUERTA/PISO
+        const movedToTDA = isAlmacenar && (
+          mov.ubicFinal.includes('TDA') || 
+          (mov.ubicFinal !== '' && !mov.ubicFinal.includes('PUERTA') && !mov.ubicFinal.includes('PISO'))
+        );
+
+        // Detectar descuento de unidades en reposición (Cantidad Ajustada < 0)
+        const isDescuento = isReponer && mov.cantAjustada < 0;
+
+        // También considerar si Cantidad Ajustada == 0 en RF_REPONER pero ya venía en 0
+        if (!movedToTDA && !isDescuento && !isAlmacenar) return;
+
+        let tipoAccion = 'OTRO';
+        let unidadesMovidas = 0;
+
+        if (movedToTDA || isAlmacenar) {
+          tipoAccion = 'SUBIDA_TDA';
+          // Si tiene cantOriginal > 0 en el movimiento, la tomamos como referencia de unidades subidas
+          unidadesMovidas = mov.cantOriginal > 0 ? mov.cantOriginal : 0;
+        } else if (isDescuento) {
+          tipoAccion = 'CONSUMO_REPOSICION';
+          unidadesMovidas = Math.abs(mov.cantAjustada);
+        }
+
+        const enrichedMov = {
+          ...mov,
+          tipoAccion,
+          unidadesMovidas,
+          enBase: baseMap.has(mov.lpn)
+        };
+        validMovs.push(enrichedMov);
+
+        if (!repoByLPN.has(mov.lpn)) {
+          repoByLPN.set(mov.lpn, {
+            lpn: mov.lpn,
+            enBase: baseMap.has(mov.lpn),
+            subidoTDA: false,
+            ubicacionFinal: '',
+            ubicacionInicial: mov.ubicInicial,
+            cantOriginalRef: mov.cantOriginal,
+            unidadesDescontadas: 0,
+            unidadesSubidasRef: 0,
+            usuarios: new Set(),
+            ultimoUsuario: '',
+            ultimaTs: null,
+            skus: new Set(),
+            movimientos: []
+          });
+        }
+
+        const rEntry = repoByLPN.get(mov.lpn);
+        rEntry.movimientos.push(enrichedMov);
+        if (mov.sku) rEntry.skus.add(mov.sku);
+        if (mov.usuario) {
+          rEntry.usuarios.add(mov.usuario);
+          rEntry.ultimoUsuario = mov.usuario;
+        }
+        if (mov.timestamp && (!rEntry.ultimaTs || mov.timestamp >= rEntry.ultimaTs)) {
+          rEntry.ultimaTs = mov.timestamp;
+          if (mov.usuario) rEntry.ultimoUsuario = mov.usuario;
+        }
+        if (mov.cantOriginal > rEntry.cantOriginalRef) {
+          rEntry.cantOriginalRef = mov.cantOriginal;
+        }
+
+        if (tipoAccion === 'SUBIDA_TDA') {
+          rEntry.subidoTDA = true;
+          if (mov.ubicFinal) rEntry.ubicacionFinal = mov.ubicFinal;
+          if (mov.cantOriginal > 0) rEntry.unidadesSubidasRef = Math.max(rEntry.unidadesSubidasRef, mov.cantOriginal);
+        } else if (tipoAccion === 'CONSUMO_REPOSICION') {
+          rEntry.unidadesDescontadas += unidadesMovidas;
+          if (mov.ubicFinal) rEntry.ubicacionFinal = mov.ubicFinal;
+        }
+      });
+
+      state.validMovements = validMovs;
+
+      // -----------------------------------------------------------------------
+      // PASO C: Cruzar Base IBLPN vs Movimientos de Reposición
+      // -----------------------------------------------------------------------
+      baseMap.forEach((bEntry, lpn) => {
+        const rEntry = repoByLPN.get(lpn);
+        if (!rEntry) {
+          bEntry.statusControl = 'PENDIENTE';
+          bEntry.saldoRestante = bEntry.unActualTotal;
+          return;
+        }
+
+        bEntry.usuariosSet = rEntry.usuarios;
+        bEntry.ultimoUsuario = rEntry.ultimoUsuario;
+        bEntry.ultimaActividadTs = rEntry.ultimaTs;
+        bEntry.ubicacionFinal = rEntry.ubicacionFinal;
+        bEntry.movimientos = rEntry.movimientos;
+
+        if (rEntry.subidoTDA) {
+          bEntry.statusControl = 'SUBIDO_TDA';
+          bEntry.unidadesSubidasTDA = bEntry.unActualTotal > 0 ? bEntry.unActualTotal : rEntry.unidadesSubidasRef;
+          bEntry.unidadesConsumidas = rEntry.unidadesDescontadas;
+          bEntry.saldoRestante = 0;
+        } else if (rEntry.unidadesDescontadas > 0) {
+          bEntry.unidadesConsumidas = rEntry.unidadesDescontadas;
+          const restante = Math.max(0, bEntry.unActualTotal - rEntry.unidadesDescontadas);
+          bEntry.saldoRestante = restante;
+
+          // Si se descontó todo el contenido de la caja (o iguala la cantidad original dejando en 0)
+          if (restante === 0 || (rEntry.cantOriginalRef > 0 && rEntry.unidadesDescontadas >= rEntry.cantOriginalRef)) {
+            bEntry.statusControl = 'CONSUMIDO_TOTAL';
+            bEntry.saldoRestante = 0;
+          } else {
+            bEntry.statusControl = 'CONSUMO_PARCIAL';
+          }
+        }
+      });
+
+      // Detectar LPNs trabajados en Reposición que NO estaban en la Base actual
+      const extraLPNs = [];
+      repoByLPN.forEach((rEntry, lpn) => {
+        if (!rEntry.enBase) {
+          let status = 'CONSUMO_PARCIAL';
+          if (rEntry.subidoTDA) status = 'SUBIDO_TDA';
+          else if (rEntry.cantOriginalRef > 0 && rEntry.unidadesDescontadas >= rEntry.cantOriginalRef) status = 'CONSUMIDO_TOTAL';
+          
+          extraLPNs.push({
+            ...rEntry,
+            statusControl: status
+          });
+        }
+      });
+
+      state.consolidatedLPNs = Array.from(baseMap.values());
+      state.extraLPNMovements = extraLPNs;
+
+      // -----------------------------------------------------------------------
+      // PASO D: Calcular Productividad por Usuario (Sobre todos los LPNs trabajados)
+      // -----------------------------------------------------------------------
+      const userMap = new Map();
+
+      const ensureUser = (u) => {
+        const key = u || 'SIN_USUARIO';
+        if (!userMap.has(key)) {
+          userMap.set(key, {
+            usuario: key,
+            lpnSubidosSet: new Set(),
+            lpnConsTotalSet: new Set(),
+            lpnConsParcialSet: new Set(),
+            lpnTotalesSet: new Set(),
+            unidadesSubidas: 0,
+            unidadesRepuestas: 0,
+            firstTs: null,
+            lastTs: null,
+            movimientosCount: 0
+          });
+        }
+        return userMap.get(key);
+      };
+
+      // Registrar timestamps y unidades exactas por movimiento
+      validMovs.forEach(mov => {
+        const uObj = ensureUser(mov.usuario);
+        uObj.movimientosCount++;
+        uObj.lpnTotalesSet.add(mov.lpn);
+
+        if (mov.timestamp) {
+          if (!uObj.firstTs || mov.timestamp < uObj.firstTs) uObj.firstTs = mov.timestamp;
+          if (!uObj.lastTs || mov.timestamp > uObj.lastTs) uObj.lastTs = mov.timestamp;
+        }
+
+        if (mov.tipoAccion === 'SUBIDA_TDA') {
+          uObj.lpnSubidosSet.add(mov.lpn);
+          // Tomar unidades de la Base si existe, sino del movimiento
+          const baseItem = baseMap.get(mov.lpn);
+          const un = baseItem ? baseItem.unActualTotal : mov.unidadesMovidas;
+          uObj.unidadesSubidas += un;
+        } else if (mov.tipoAccion === 'CONSUMO_REPOSICION') {
+          uObj.unidadesRepuestas += mov.unidadesMovidas;
+        }
+      });
+
+      // Clasificar LPNs consumidos total vs parcial por usuario responsable
+      const classifyUserLPN = (lpn, status, usuario) => {
+        if (!usuario) return;
+        const uObj = ensureUser(usuario);
+        uObj.lpnTotalesSet.add(lpn);
+        if (status === 'SUBIDO_TDA') {
+          uObj.lpnSubidosSet.add(lpn);
+        } else if (status === 'CONSUMIDO_TOTAL') {
+          if (!uObj.lpnSubidosSet.has(lpn)) uObj.lpnConsTotalSet.add(lpn);
+        } else if (status === 'CONSUMO_PARCIAL') {
+          if (!uObj.lpnSubidosSet.has(lpn) && !uObj.lpnConsTotalSet.has(lpn)) {
+            uObj.lpnConsParcialSet.add(lpn);
+          }
+        }
+      };
+
+      state.consolidatedLPNs.forEach(item => {
+        if (item.statusControl !== 'PENDIENTE') {
+          classifyUserLPN(item.lpn, item.statusControl, item.ultimoUsuario);
+        }
+      });
+
+      extraLPNs.forEach(item => {
+        classifyUserLPN(item.lpn, item.statusControl, item.ultimoUsuario);
+      });
+
+      const userStatsArr = Array.from(userMap.values()).map(u => {
+        const subidos = u.lpnSubidosSet.size;
+        const consTotal = u.lpnConsTotalSet.size;
+        const consParcial = u.lpnConsParcialSet.size;
+        const totalLPNs = u.lpnTotalesSet.size;
+        const totalUnidades = u.unidadesSubidas + u.unidadesRepuestas;
+
+        // Cálculo de horas activas entre primera y última marca del turno
+        let horasActivas = 0;
+        if (u.firstTs && u.lastTs && u.lastTs > u.firstTs) {
+          horasActivas = (u.lastTs - u.firstTs) / (1000 * 60 * 60);
+        }
+        // Mínimo 0.25 hrs (15 min) para evitar divisiones infinitas si hizo pocos movimientos seguidos
+        const horasCalculo = horasActivas > 0 ? Math.max(horasActivas, 0.25) : 1;
+        const lpnPorHora = totalLPNs / horasCalculo;
+        const unPorHora = totalUnidades / horasCalculo;
+
+        return {
+          usuario: u.usuario,
+          subidos,
+          consTotal,
+          consParcial,
+          totalLPNs,
+          totalUnidades,
+          firstTs: u.firstTs,
+          lastTs: u.lastTs,
+          horasActivas,
+          lpnPorHora,
+          unPorHora
+        };
+      }).sort((a, b) => b.totalLPNs - a.totalLPNs || b.totalUnidades - a.totalUnidades);
+
+      state.userStats = userStatsArr;
+
+      // -----------------------------------------------------------------------
+      // PASO E: Agrupar por Jerarquía de Artículo 2
+      // -----------------------------------------------------------------------
+      const jerMap = new Map();
+      state.consolidatedLPNs.forEach(item => {
+        const jer = Array.from(item.jerarquias)[0] || 'SIN JERARQUÍA';
+        if (!jerMap.has(jer)) {
+          jerMap.set(jer, {
+            jerarquia: jer,
+            totalLPNs: 0,
+            atendidos: 0,
+            pendientes: 0,
+            pendPuerta: 0,
+            pendPiso: 0,
+            unidadesPendientes: 0
+          });
+        }
+        const j = jerMap.get(jer);
+        j.totalLPNs++;
+        if (item.statusControl === 'PENDIENTE') {
+          j.pendientes++;
+          j.unidadesPendientes += item.saldoRestante;
+          if (item.zonaInicial === 'PUERTA') j.pendPuerta++;
+          else if (item.zonaInicial === 'PISO') j.pendPiso++;
+        } else {
+          j.atendidos++;
+        }
+      });
+
+      state.hierarchyStats = Array.from(jerMap.values())
+        .sort((a, b) => b.pendientes - a.pendientes || b.totalLPNs - a.totalLPNs);
+
+      // -----------------------------------------------------------------------
+      // PASO F: Calcular KPIs Globales
+      // -----------------------------------------------------------------------
+      let totalBaseLPN = state.consolidatedLPNs.length;
+      let totalUnidadesBase = 0;
+      let subidosTDA = 0;
+      let consumidosTotal = 0;
+      let consumidosParcial = 0;
+      let pendientesTotal = 0;
+      let pendientesUnidades = 0;
+      let pendPuerta = 0, pendPuertaUn = 0;
+      let pendPiso = 0, pendPisoUn = 0;
+
+      state.consolidatedLPNs.forEach(item => {
+        totalUnidadesBase += item.unActualTotal;
+        if (item.statusControl === 'SUBIDO_TDA') subidosTDA++;
+        else if (item.statusControl === 'CONSUMIDO_TOTAL') consumidosTotal++;
+        else if (item.statusControl === 'CONSUMO_PARCIAL') consumidosParcial++;
+        else {
+          pendientesTotal++;
+          pendientesUnidades += item.saldoRestante;
+          if (item.zonaInicial === 'PUERTA') {
+            pendPuerta++;
+            pendPuertaUn += item.saldoRestante;
+          } else if (item.zonaInicial === 'PISO') {
+            pendPiso++;
+            pendPisoUn += item.saldoRestante;
+          }
+        }
+      });
+
+      const totalAtendidosBase = subidosTDA + consumidosTotal + consumidosParcial;
+      const pctAvance = totalBaseLPN > 0 ? Math.round((totalAtendidosBase / totalBaseLPN) * 1000) / 10 : 0;
+
+      const totalLPNMovidosEquipo = userStatsArr.reduce((acc, u) => acc + u.totalLPNs, 0);
+      const totalUnidadesMovidasEquipo = userStatsArr.reduce((acc, u) => acc + u.totalUnidades, 0);
+
+      state.kpis = {
+        totalBaseLPN,
+        totalUnidadesBase,
+        totalAtendidosBase,
+        pctAvance,
+        subidosTDA,
+        consumidosTotal,
+        consumidosParcial,
+        pendientesTotal,
+        pendientesUnidades,
+        pendPuerta,
+        pendPuertaUn,
+        pendPiso,
+        pendPisoUn,
+        extraLPNsCount: extraLPNs.length,
+        totalLPNMovidosEquipo,
+        totalUnidadesMovidasEquipo,
+        usuariosActivos: userStatsArr.length
+      };
+
+      // Renderizar toda la interfaz
+      renderKPIs();
+      populateFilterDropdowns();
+      renderUsersTab();
+      renderBaseTab();
+      renderJerarquiaTab();
+      renderBitacoraTab();
+      lucide.createIcons();
+    }
+
+    // =========================================================================
+    // 5. RENDERIZADO DE COMPONENTES UI
+    // =========================================================================
+    function updateHeaderStatus() {
+      const statusBaseEl = document.getElementById('statusBase');
+      const statusRepoEl = document.getElementById('statusRepo');
+      const baseBadge = document.getElementById('baseBadgeInfo');
+      const repoBadge = document.getElementById('repoBadgeInfo');
+
+      if (state.baseMeta) {
+        statusBaseEl.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400"></span>Base IBLPN: <strong class="text-white font-semibold">${state.baseMeta.fileName}</strong> <span class="text-slate-400">(${state.baseMeta.loadedAt})</span>`;
+        baseBadge.innerHTML = `<span class="inline-flex items-center gap-1 text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">✓ Cargado: ${state.baseMeta.fileName}</span>`;
+      } else {
+        statusBaseEl.innerHTML = `<span class="w-2 h-2 rounded-full bg-slate-500"></span>Base IBLPN: <strong class="text-slate-300">Sin cargar</strong>`;
+        baseBadge.innerHTML = '';
+      }
+
+      if (state.repoMeta) {
+        statusRepoEl.innerHTML = `<span class="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>Reposición: <strong class="text-white font-semibold">${state.repoMeta.fileName}</strong> <span class="text-slate-400">(${state.repoMeta.loadedAt})</span>`;
+        repoBadge.innerHTML = `<span class="inline-flex items-center gap-1 text-blue-700 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200">✓ Último corte: ${state.repoMeta.fileName}</span>`;
+      } else {
+        statusRepoEl.innerHTML = `<span class="w-2 h-2 rounded-full bg-slate-500"></span>Reposición: <strong class="text-slate-300">Sin cargar</strong>`;
+        repoBadge.innerHTML = '';
+      }
+    }
+
+    function renderKPIs() {
+      const k = state.kpis;
+      document.getElementById('kpiPctAvance').textContent = `${k.pctAvance}%`;
+      document.getElementById('kpiAtendidosRatio').textContent = `${k.totalAtendidosBase} / ${k.totalBaseLPN} LPNs`;
+      document.getElementById('kpiProgressBar').style.width = `${Math.min(100, k.pctAvance)}%`;
+      document.getElementById('kpiTotalUnidadesBase').textContent = `${k.totalUnidadesBase.toLocaleString('es-PE')} un. en base`;
+
+      const extraBadge = document.getElementById('kpiAdicionalesBadge');
+      if (k.extraLPNsCount > 0) {
+        extraBadge.textContent = `+${k.extraLPNsCount} LPN fuera de base`;
+        extraBadge.classList.remove('hidden');
+      } else {
+        extraBadge.classList.add('hidden');
+      }
+
+      document.getElementById('kpiTotalAtendidos').textContent = k.totalAtendidosBase.toLocaleString('es-PE');
+      document.getElementById('kpiSubidosTDA').textContent = k.subidosTDA.toLocaleString('es-PE');
+      document.getElementById('kpiConsumidosTotal').textContent = k.consumidosTotal.toLocaleString('es-PE');
+      document.getElementById('kpiConsumidosParcial').textContent = k.consumidosParcial.toLocaleString('es-PE');
+
+      document.getElementById('kpiPendientesTotal').textContent = k.pendientesTotal.toLocaleString('es-PE');
+      document.getElementById('kpiPendientesUnidades').textContent = `(${k.pendientesUnidades.toLocaleString('es-PE')} un.)`;
+      document.getElementById('kpiPendPuerta').textContent = `${k.pendPuerta} LPN`;
+      document.getElementById('kpiPendPuertaUn').textContent = `${k.pendPuertaUn.toLocaleString('es-PE')} un.`;
+      document.getElementById('kpiPendPiso').textContent = `${k.pendPiso} LPN`;
+      document.getElementById('kpiPendPisoUn').textContent = `${k.pendPisoUn.toLocaleString('es-PE')} un.`;
+
+      document.getElementById('kpiTotalLPNMovidos').textContent = k.totalLPNMovidosEquipo.toLocaleString('es-PE');
+      document.getElementById('kpiTotalUnidadesMovidas').textContent = `${k.totalUnidadesMovidasEquipo.toLocaleString('es-PE')} un.`;
+      document.getElementById('kpiTotalUsuarios').textContent = `${k.usuariosActivos} usuarios`;
+
+      document.getElementById('badgeCountBase').textContent = k.totalBaseLPN;
+      document.getElementById('badgeCountMovs').textContent = state.validMovements.length;
+    }
+
+    function populateFilterDropdowns() {
+      // Jerarquías
+      const jerSelect = document.getElementById('filterBaseJerarquia');
+      const currentJer = jerSelect.value;
+      const jerList = state.hierarchyStats.map(h => h.jerarquia).sort();
+      jerSelect.innerHTML = `<option value="ALL">Todas las familias (${jerList.length})</option>` +
+        jerList.map(j => `<option value="${escapeHtml(j)}">${escapeHtml(j)}</option>`).join('');
+      if (jerList.includes(currentJer)) jerSelect.value = currentJer;
+
+      // Usuarios
+      const userSelectBase = document.getElementById('filterBaseUsuario');
+      const userSelectMov = document.getElementById('filterMovUsuario');
+      const usersList = state.userStats.map(u => u.usuario).sort();
+
+      const userOpts = `<option value="ALL">Todos los usuarios (${usersList.length})</option>` +
+        usersList.map(u => `<option value="${escapeHtml(u)}">${escapeHtml(u)}</option>`).join('');
+      
+      userSelectBase.innerHTML = userOpts;
+      userSelectMov.innerHTML = userOpts;
+    }
+
+    // --- TAB 1: USUARIOS ---
+    function renderUsersTab() {
+      const search = document.getElementById('searchUser').value.trim().toUpperCase();
+      const metaLpnHora = parseFloat(document.getElementById('metaLpnHora').value) || 15;
+
+      const filtered = state.userStats.filter(u => u.usuario.includes(search));
+      const tbody = document.getElementById('usersTableBody');
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="11" class="py-8 text-center text-slate-400">No hay actividad de usuarios registrada aún. Sube el reporte de Reposición.</td></tr>`;
+        renderUsersChart([]);
+        return;
+      }
+
+      tbody.innerHTML = filtered.map((u, idx) => {
+        const rankBadge = idx === 0 
+          ? `<span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-100 text-amber-700 font-extrabold">1</span>`
+          : idx === 1
+          ? `<span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-slate-200 text-slate-700 font-bold">2</span>`
+          : idx === 2
+          ? `<span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-orange-100 text-orange-700 font-bold">3</span>`
+          : `<span class="text-slate-500 font-semibold">${idx + 1}</span>`;
+
+        const ritmo = u.lpnPorHora.toFixed(1);
+        const pctMeta = (u.lpnPorHora / metaLpnHora) * 100;
+        let semaforoHtml = '';
+        if (pctMeta >= 100) {
+          semaforoHtml = `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-700">Óptimo (${Math.round(pctMeta)}%)</span>`;
+        } else if (pctMeta >= 70) {
+          semaforoHtml = `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-100 text-amber-700">Regular (${Math.round(pctMeta)}%)</span>`;
+        } else {
+          semaforoHtml = `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-100 text-rose-700">Bajo (${Math.round(pctMeta)}%)</span>`;
+        }
+
+        const timeRange = u.firstTs 
+          ? `${formatTimeShort(new Date(u.firstTs))} - ${formatTimeShort(new Date(u.lastTs))}`
+          : '-';
+
+        const horasStr = u.horasActivas > 0 ? `${u.horasActivas.toFixed(1)} hrs` : '< 15m';
+
+        return `
+          <tr class="hover:bg-slate-50/90 transition">
+            <td class="py-3 px-4 text-center">${rankBadge}</td>
+            <td class="py-3 px-4 font-bold text-slate-900">${escapeHtml(u.usuario)}</td>
+            <td class="py-3 px-4 text-center font-semibold text-indigo-600">${u.subidos}</td>
+            <td class="py-3 px-4 text-center font-semibold text-emerald-600">${u.consTotal}</td>
+            <td class="py-3 px-4 text-center font-semibold text-amber-600">${u.consParcial}</td>
+            <td class="py-3 px-4 text-center font-extrabold text-blue-700 bg-blue-50/40 text-sm">${u.totalLPNs}</td>
+            <td class="py-3 px-4 text-right font-bold text-slate-800">${u.totalUnidades.toLocaleString('es-PE')}</td>
+            <td class="py-3 px-4 text-center text-slate-500 font-mono text-[11px]">${timeRange}</td>
+            <td class="py-3 px-4 text-center text-slate-600">${horasStr}</td>
+            <td class="py-3 px-4 text-center font-bold text-slate-800">${ritmo}</td>
+            <td class="py-3 px-4 text-center">${semaforoHtml}</td>
+          </tr>
+        `;
+      }).join('');
+
+      renderUsersChart(filtered.slice(0, 15)); // Top 15 en gráfico para claridad visual
+    }
+
+    function renderUsersChart(users) {
+      const ctx = document.getElementById('usersChart');
+      if (usersChartInstance) {
+        usersChartInstance.destroy();
+      }
+      if (!users || users.length === 0) return;
+
+      usersChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: users.map(u => u.usuario),
+          datasets: [
+            {
+              label: 'Subidos a TDA (RF_ALMACENAR)',
+              data: users.map(u => u.subidos),
+              backgroundColor: '#6366f1',
+              borderRadius: 6
+            },
+            {
+              label: 'Repuestos / Consumidos (RF_REPONER)',
+              data: users.map(u => u.consTotal + u.consParcial),
+              backgroundColor: '#10b981',
+              borderRadius: 6
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              mode: 'index',
+              intersect: false
+            }
+          },
+          scales: {
+            x: {
+              stacked: true,
+              grid: { display: false },
+              ticks: { font: { size: 11, weight: '600' } }
+            },
+            y: {
+              stacked: true,
+              beginAtZero: true,
+              grid: { color: '#f1f5f9' },
+              ticks: { precision: 0, font: { size: 11 } }
+            }
+          }
+        }
+      });
+    }
+
+    // --- TAB 2: CONTROL BASE IBLPN ---
+    function resetBasePageAndRender() {
+      baseCurrentPage = 1;
+      renderBaseTab();
+    }
+
+    function changeBasePage(delta) {
+      baseCurrentPage += delta;
+      renderBaseTab();
+    }
+
+    function getFilteredBaseLPNs() {
+      const search = document.getElementById('filterBaseSearch').value.trim().toUpperCase();
+      const estado = document.getElementById('filterBaseEstado').value;
+      const zona = document.getElementById('filterBaseZona').value;
+      const jer = document.getElementById('filterBaseJerarquia').value;
+      const usuario = document.getElementById('filterBaseUsuario').value;
+
+      return state.consolidatedLPNs.filter(item => {
+        if (estado === 'PENDIENTE' && item.statusControl !== 'PENDIENTE') return false;
+        if (estado === 'ATENDIDO' && item.statusControl === 'PENDIENTE') return false;
+        if (['SUBIDO_TDA', 'CONSUMIDO_TOTAL', 'CONSUMO_PARCIAL'].includes(estado) && item.statusControl !== estado) return false;
+
+        if (zona !== 'ALL' && item.zonaInicial !== zona) return false;
+        if (jer !== 'ALL' && !item.jerarquias.has(jer)) return false;
+        if (usuario !== 'ALL' && !item.usuariosSet.has(usuario)) return false;
+
+        if (search) {
+          const skuStr = Array.from(item.skus).join(' ').toUpperCase();
+          const descStr = Array.from(item.descripciones).join(' ').toUpperCase();
+          const jerStr = Array.from(item.jerarquias).join(' ').toUpperCase();
+          const match = item.lpn.includes(search) || skuStr.includes(search) || descStr.includes(search) || jerStr.includes(search);
+          if (!match) return false;
+        }
+        return true;
+      });
+    }
+
+    function renderBaseTab() {
+      const filtered = getFilteredBaseLPNs();
+      const pageSize = parseInt(document.getElementById('basePageSize').value, 10) || 50;
+      const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+      if (baseCurrentPage > totalPages) baseCurrentPage = totalPages;
+      if (baseCurrentPage < 1) baseCurrentPage = 1;
+
+      const startIdx = (baseCurrentPage - 1) * pageSize;
+      const slice = filtered.slice(startIdx, startIdx + pageSize);
+
+      document.getElementById('baseFilterSummary').textContent = `Mostrando ${slice.length} de ${filtered.length} LPNs filtrados`;
+      document.getElementById('basePageInfo').textContent = `Página ${baseCurrentPage} de ${totalPages}`;
+      document.getElementById('btnPrevBase').disabled = baseCurrentPage <= 1;
+      document.getElementById('btnNextBase').disabled = baseCurrentPage >= totalPages;
+
+      const tbody = document.getElementById('baseTableBody');
+      if (slice.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="10" class="py-8 text-center text-slate-400">No se encontraron LPNs con los filtros seleccionados.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = slice.map(item => {
+        let badgeEstado = '';
+        if (item.statusControl === 'SUBIDO_TDA') {
+          badgeEstado = `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-100 text-indigo-700">Subido TDA</span>`;
+        } else if (item.statusControl === 'CONSUMIDO_TOTAL') {
+          badgeEstado = `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-700">Consumido Total</span>`;
+        } else if (item.statusControl === 'CONSUMO_PARCIAL') {
+          badgeEstado = `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800">Consumo Parcial</span>`;
+        } else {
+          badgeEstado = `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-100 text-rose-700">Pendiente</span>`;
+        }
+
+        const skus = Array.from(item.skus).join(', ');
+        const descs = Array.from(item.descripciones).join(' / ');
+        const jers = Array.from(item.jerarquias).join(', ');
+        const unMovidasDisplay = item.statusControl === 'SUBIDO_TDA' ? item.unidadesSubidasTDA : item.unidadesConsumidas;
+        const horaStr = item.ultimaActividadTs ? formatDateTimeFull(new Date(item.ultimaActividadTs)) : '-';
+
+        return `
+          <tr class="hover:bg-slate-50 transition">
+            <td class="py-2.5 px-4 font-mono font-bold text-slate-900 whitespace-nowrap">${escapeHtml(item.lpn)}</td>
+            <td class="py-2.5 px-4 whitespace-nowrap">${badgeEstado}</td>
+            <td class="py-2.5 px-4 max-w-xs">
+              <div class="font-bold text-slate-800">${escapeHtml(skus)}</div>
+              <div class="text-[11px] text-slate-500 truncate" title="${escapeHtml(descs)}">${escapeHtml(descs)}</div>
+            </td>
+            <td class="py-2.5 px-4 text-slate-600 font-medium">${escapeHtml(jers)}</td>
+            <td class="py-2.5 px-4 whitespace-nowrap font-mono text-[11px]">
+              <span class="text-slate-700 font-semibold">${escapeHtml(item.ubicacionInicial)}</span>
+              ${item.ubicacionFinal ? `<span class="text-blue-600 font-bold block">→ ${escapeHtml(item.ubicacionFinal)}</span>` : ''}
+            </td>
+            <td class="py-2.5 px-4 text-right font-semibold text-slate-700">${item.unActualTotal}</td>
+            <td class="py-2.5 px-4 text-right font-bold ${unMovidasDisplay > 0 ? 'text-emerald-600' : 'text-slate-400'}">${unMovidasDisplay}</td>
+            <td class="py-2.5 px-4 text-right font-extrabold ${item.saldoRestante > 0 ? 'text-rose-600' : 'text-slate-400'}">${item.saldoRestante}</td>
+            <td class="py-2.5 px-4 font-bold text-slate-800">${escapeHtml(item.ultimoUsuario || '-')}</td>
+            <td class="py-2.5 px-4 text-slate-500 whitespace-nowrap">${horaStr}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    // --- TAB 3: JERARQUÍA ---
+    function renderJerarquiaTab() {
+      const tbody = document.getElementById('jerarquiaTableBody');
+      if (state.hierarchyStats.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" class="py-8 text-center text-slate-400">Carga la Base IBLPN para ver el desglose por familia.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = state.hierarchyStats.map(j => {
+        const pct = j.totalLPNs > 0 ? Math.round((j.atendidos / j.totalLPNs) * 100) : 0;
+        const barColor = pct >= 80 ? 'bg-emerald-500' : pct >= 40 ? 'bg-blue-500' : 'bg-amber-500';
+
+        return `
+          <tr class="hover:bg-slate-50 transition">
+            <td class="py-3 px-4 font-bold text-slate-800">${escapeHtml(j.jerarquia)}</td>
+            <td class="py-3 px-4 text-center font-semibold text-slate-700">${j.totalLPNs}</td>
+            <td class="py-3 px-4 text-center font-bold text-emerald-600">${j.atendidos}</td>
+            <td class="py-3 px-4 text-center font-bold text-rose-600">${j.pendientes}</td>
+            <td class="py-3 px-4 text-center text-slate-600">${j.pendPuerta}</td>
+            <td class="py-3 px-4 text-center text-slate-600">${j.pendPiso}</td>
+            <td class="py-3 px-4 text-right font-bold text-slate-800">${j.unidadesPendientes.toLocaleString('es-PE')}</td>
+            <td class="py-3 px-4">
+              <div class="flex items-center gap-2">
+                <div class="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
+                  <div class="h-full ${barColor} rounded-full" style="width: ${pct}%"></div>
+                </div>
+                <span class="text-xs font-bold text-slate-700 w-9 text-right">${pct}%</span>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    // --- TAB 4: BITÁCORA MOVIMIENTOS ---
+    function renderBitacoraTab() {
+      const search = document.getElementById('filterMovSearch').value.trim().toUpperCase();
+      const pantalla = document.getElementById('filterMovPantalla').value;
+      const usuario = document.getElementById('filterMovUsuario').value;
+
+      const filtered = state.validMovements.filter(m => {
+        if (pantalla !== 'ALL' && !m.pantalla.includes(pantalla)) return false;
+        if (usuario !== 'ALL' && m.usuario !== usuario) return false;
+        if (search && !m.lpn.includes(search) && !m.sku.toUpperCase().includes(search)) return false;
+        return true;
+      });
+
+      const tbody = document.getElementById('bitacoraTableBody');
+      const limit = 200;
+      const slice = filtered.slice(0, limit);
+
+      if (slice.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="10" class="py-8 text-center text-slate-400">No hay movimientos de reposición para mostrar.</td></tr>`;
+        document.getElementById('bitacoraFooterNote').textContent = '';
+        return;
+      }
+
+      tbody.innerHTML = slice.map(m => {
+        const isSubida = m.tipoAccion === 'SUBIDA_TDA';
+        const accionBadge = isSubida
+          ? `<span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-indigo-100 text-indigo-700">Subida / Anclaje TDA</span>`
+          : `<span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-700">Consumo Reposición</span>`;
+
+        const enBaseBadge = m.enBase
+          ? `<span class="text-emerald-600 font-bold">Sí</span>`
+          : `<span class="text-slate-400">Adicional</span>`;
+
+        const fechaStr = m.timestamp ? formatDateTimeFull(new Date(m.timestamp)) : escapeHtml(m.fechaRaw);
+
+        return `
+          <tr class="hover:bg-slate-50 transition">
+            <td class="py-2.5 px-4 whitespace-nowrap text-slate-600 font-mono text-[11px]">${fechaStr}</td>
+            <td class="py-2.5 px-4 font-bold text-slate-900">${escapeHtml(m.usuario)}</td>
+            <td class="py-2.5 px-4 font-mono text-[11px] text-slate-600">${escapeHtml(m.pantalla)}</td>
+            <td class="py-2.5 px-4 font-mono font-bold text-slate-800">${escapeHtml(m.lpn)}</td>
+            <td class="py-2.5 px-4 text-slate-700">${escapeHtml(m.sku)}</td>
+            <td class="py-2.5 px-4 whitespace-nowrap">${accionBadge}</td>
+            <td class="py-2.5 px-4 text-right text-slate-600">${m.cantOriginal}</td>
+            <td class="py-2.5 px-4 text-right font-bold ${m.cantAjustada < 0 ? 'text-rose-600' : 'text-slate-600'}">${m.cantAjustada}</td>
+            <td class="py-2.5 px-4 font-mono text-[11px] text-slate-600">${escapeHtml(m.ubicInicial)} → <strong class="text-slate-900">${escapeHtml(m.ubicFinal)}</strong></td>
+            <td class="py-2.5 px-4 text-center">${enBaseBadge}</td>
+          </tr>
+        `;
+      }).join('');
+
+      document.getElementById('bitacoraFooterNote').textContent = filtered.length > limit
+        ? `Mostrando los primeros ${limit} de ${filtered.length} movimientos (usa los filtros o exporta a Excel para ver todos).`
+        : `Total: ${filtered.length} movimientos mostrados.`;
+    }
+
+    // =========================================================================
+    // 6. EXPORTACIÓN A EXCEL CONSOLIDADO (3 HOJAS)
+    // =========================================================================
+    function exportConsolidatedExcel() {
+      if (state.consolidatedLPNs.length === 0 && state.userStats.length === 0) {
+        showToast('No hay datos procesados para exportar.', 'error');
+        return;
+      }
+
+      try {
+        const wb = XLSX.utils.book_new();
+
+        // HOJA 1: Resumen Productividad Usuarios
+        const metaLpnHora = parseFloat(document.getElementById('metaLpnHora').value) || 15;
+        const sheetUsersData = state.userStats.map((u, idx) => ({
+          'Puesto': idx + 1,
+          'Usuario': u.usuario,
+          'LPNs Subidos TDA (RF_ALMACENAR)': u.subidos,
+          'LPNs Consumidos Total': u.consTotal,
+          'LPNs Consumo Parcial': u.consParcial,
+          'Total LPNs Trabajados': u.totalLPNs,
+          'Total Unidades Movidas': u.totalUnidades,
+          'Primera Actividad': u.firstTs ? formatDateTimeFull(new Date(u.firstTs)) : '-',
+          'Última Actividad': u.lastTs ? formatDateTimeFull(new Date(u.lastTs)) : '-',
+          'Horas Activas': Number(u.horasActivas.toFixed(2)),
+          'Ritmo LPN/Hora': Number(u.lpnPorHora.toFixed(1)),
+          '% Cumplimiento Meta': `${Math.round((u.lpnPorHora / metaLpnHora) * 100)}%`
+        }));
+        const wsUsers = XLSX.utils.json_to_sheet(sheetUsersData);
+        XLSX.utils.book_append_sheet(wb, wsUsers, 'Resumen_Usuarios');
+
+        // HOJA 2: Seguimiento Base LPN
+        const statusLabelMap = {
+          'PENDIENTE': 'Pendiente',
+          'SUBIDO_TDA': 'Subido / Ubicado TDA',
+          'CONSUMIDO_TOTAL': 'Consumido Total (0 un.)',
+          'CONSUMO_PARCIAL': 'Consumo Parcial / Dividido'
+        };
+        const sheetBaseData = state.consolidatedLPNs.map(item => ({
+          'Número de LPN': item.lpn,
+          'Estado Control': statusLabelMap[item.statusControl] || item.statusControl,
+          'SKU': Array.from(item.skus).join(', '),
+          'Descripción': Array.from(item.descripciones).join(' / '),
+          'Jerarquía 2': Array.from(item.jerarquias).join(', '),
+          'Zona Inicial': item.zonaInicial,
+          'Ubicación Inicial': item.ubicacionInicial,
+          'Ubicación Final': item.ubicacionFinal || '-',
+          'Unidades Base': item.unActualTotal,
+          'Unidades Movidas/Consumidas': item.statusControl === 'SUBIDO_TDA' ? item.unidadesSubidasTDA : item.unidadesConsumidas,
+          'Saldo Restante': item.saldoRestante,
+          'Usuario Responsable': item.ultimoUsuario || '-',
+          'Fecha/Hora Actividad': item.ultimaActividadTs ? formatDateTimeFull(new Date(item.ultimaActividadTs)) : '-'
+        }));
+        const wsBase = XLSX.utils.json_to_sheet(sheetBaseData);
+        XLSX.utils.book_append_sheet(wb, wsBase, 'Seguimiento_Base_LPN');
+
+        // HOJA 3: Pendientes por Jerarquía
+        const sheetJerData = state.hierarchyStats.map(j => ({
+          'Jerarquía de Artículo 2': j.jerarquia,
+          'Total LPNs Base': j.totalLPNs,
+          'LPNs Atendidos': j.atendidos,
+          'LPNs Pendientes Total': j.pendientes,
+          'Pendientes en PUERTA': j.pendPuerta,
+          'Pendientes en PISO': j.pendPiso,
+          'Unidades Pendientes': j.unidadesPendientes,
+          '% Avance': j.totalLPNs > 0 ? `${Math.round((j.atendidos / j.totalLPNs) * 100)}%` : '0%'
+        }));
+        const wsJer = XLSX.utils.json_to_sheet(sheetJerData);
+        XLSX.utils.book_append_sheet(wb, wsJer, 'Pendientes_Jerarquia');
+
+        const dateStamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+        XLSX.writeFile(wb, `Control_Productividad_WMS_${dateStamp}.xlsx`);
+        showToast('Reporte Excel consolidado descargado correctamente.', 'success');
+      } catch (err) {
+        console.error(err);
+        showToast('Ocurrió un error al generar el archivo Excel.', 'error');
+      }
+    }
+
+    // =========================================================================
+    // 7. PERSISTENCIA EN LOCALSTORAGE Y DATOS DEMO
+    // =========================================================================
+    function saveToStorage() {
+      try {
+        localStorage.setItem(STORAGE_KEY_BASE, JSON.stringify({
+          meta: state.baseMeta,
+          records: state.baseRecords
+        }));
+        localStorage.setItem(STORAGE_KEY_REPO, JSON.stringify({
+          meta: state.repoMeta,
+          records: state.repoRecords
+        }));
+      } catch (e) {
+        console.warn('No se pudo guardar en localStorage (posible límite de espacio):', e);
+      }
+    }
+
+    function loadFromStorage() {
+      try {
+        const rawBase = localStorage.getItem(STORAGE_KEY_BASE);
+        const rawRepo = localStorage.getItem(STORAGE_KEY_REPO);
+        if (rawBase) {
+          const parsedB = JSON.parse(rawBase);
+          state.baseMeta = parsedB.meta;
+          state.baseRecords = parsedB.records || [];
+        }
+        if (rawRepo) {
+          const parsedR = JSON.parse(rawRepo);
+          state.repoMeta = parsedR.meta;
+          state.repoRecords = parsedR.records || [];
+        }
+        if (state.baseRecords.length > 0 || state.repoRecords.length > 0) {
+          recalculateAll();
+        }
+      } catch (e) {
+        console.error('Error recuperando datos guardados:', e);
+      }
+    }
+
+    function confirmClearData() {
+      showConfirmModal(
+        'Limpiar todos los datos',
+        '¿Estás seguro de que deseas borrar la Base IBLPN y el reporte de Reposición guardados en este navegador?',
+        () => {
+          localStorage.removeItem(STORAGE_KEY_BASE);
+          localStorage.removeItem(STORAGE_KEY_REPO);
+          state.baseMeta = null;
+          state.baseRecords = [];
+          state.repoMeta = null;
+          state.repoRecords = [];
+          document.getElementById('uploadPanel').classList.remove('hidden');
+          recalculateAll();
+          showToast('Datos eliminados. Listo para una nueva carga.', 'info');
+        }
+      );
+    }
+
+    function loadDemoData() {
+      const now = Date.now();
+      const hour = 3600 * 1000;
+
+      state.baseMeta = { fileName: 'DEMO_iblpn_turno_manana.xlsx', loadedAt: '05:06 AM · Demo', rawRowsCount: 10 };
+      state.baseRecords = [
+        { lpn: 'C404100001', estadoWMS: 'Recibido', sku: '20058101', descripcion: 'SET VASOS VIDRIO X6', unActual: 24, ubicacion: 'PUERTA-404-001-001', zona: 'PUERTA', jerarquia2: 'MENAJE MESA' },
+        { lpn: 'C404100002', estadoWMS: 'Recibido', sku: '20058102', descripcion: 'OLLA ACERO INOX 24CM', unActual: 6, ubicacion: 'PUERTA-404-001-002', zona: 'PUERTA', jerarquia2: 'MENAJE COCINA' },
+        { lpn: 'C404100003', estadoWMS: 'Recibido', sku: '20058103', descripcion: 'ALMOHADA MICROFIBRA STD', unActual: 12, ubicacion: 'PUERTA-404-002-001', zona: 'PUERTA', jerarquia2: 'TEXTIL HOGAR' },
+        { lpn: 'C404100004', estadoWMS: 'Ubicado', sku: '20058104', descripcion: 'LAMPARA MESA NORDICA', unActual: 8, ubicacion: 'PISO-ALM-404-000', zona: 'PISO', jerarquia2: 'ILUMINACION' },
+        { lpn: 'C404100005', estadoWMS: 'Recibido', sku: '20058105', descripcion: 'ORGANIZADOR PLASTICO 30L', unActual: 10, ubicacion: 'PUERTA-404-003-001', zona: 'PUERTA', jerarquia2: 'ORGANIZACION' },
+        { lpn: 'C404100006', estadoWMS: 'Recibido', sku: '20058106', descripcion: 'JUEGO SABANAS 2 PLAZAS', unActual: 15, ubicacion: 'PUERTA-404-003-002', zona: 'PUERTA', jerarquia2: 'TEXTIL HOGAR' },
+        { lpn: 'C404100007', estadoWMS: 'Ubicado', sku: '20058107', descripcion: 'SARTEN TEFLON 28CM', unActual: 12, ubicacion: 'PISO-ALM-404-000', zona: 'PISO', jerarquia2: 'MENAJE COCINA' },
+        { lpn: 'C404100008', estadoWMS: 'Recibido', sku: '20058108', descripcion: 'TOALLA BANO ALGODON', unActual: 20, ubicacion: 'PUERTA-404-004-001', zona: 'PUERTA', jerarquia2: 'BANO' },
+        { lpn: 'C404100009', estadoWMS: 'Recibido', sku: '20058109', descripcion: 'ESPEJO DECORATIVO REDONDO', unActual: 4, ubicacion: 'PUERTA-404-004-002', zona: 'PUERTA', jerarquia2: 'DECORACION' },
+        { lpn: 'C404100010', estadoWMS: 'Ubicado', sku: '20058110', descripcion: 'CAJA NAVIDENA ADORNOS X24', unActual: 18, ubicacion: 'PISO-ALM-404-000', zona: 'PISO', jerarquia2: 'NAVIDAD' }
+      ];
+
+      state.repoMeta = { fileName: 'DEMO_Reposicion_Corte_0830.xlsx', loadedAt: '08:30 AM · Demo', rawRowsCount: 7 };
+      state.repoRecords = [
+        // Subido a TDA
+        { tienda: '404', pantalla: 'RF_ALMACENAR', lpn: 'C404100001', sku: '20058101', cantOriginal: 24, cantAjustada: 0, ubicInicial: 'PUERTA-404-001-001', ubicFinal: 'TDA-MEN-012-001', timestamp: now - 2.5 * hour, usuario: 'JPEREZ' },
+        // Consumido total (24 -> -6)
+        { tienda: '404', pantalla: 'RF_REPONER_PUERTA', lpn: 'C404100002', sku: '20058102', cantOriginal: 6, cantAjustada: -6, ubicInicial: 'PUERTA-404-001-002', ubicFinal: 'TDA-HOME-TOTAL-001', timestamp: now - 2.1 * hour, usuario: 'MGOMEZ' },
+        // Consumo parcial (dividido: tenía 12, sacaron 5)
+        { tienda: '404', pantalla: 'RF_REPONER_PUERTA', lpn: 'C404100003', sku: '20058103', cantOriginal: 12, cantAjustada: -5, ubicInicial: 'PUERTA-404-002-001', ubicFinal: 'TDA-HOME-TOTAL-001', timestamp: now - 1.5 * hour, usuario: 'MGOMEZ' },
+        // Subido a NAV-TDA desde PISO
+        { tienda: '404', pantalla: 'RF_ALMACENAR', lpn: 'C404100010', sku: '20058110', cantOriginal: 18, cantAjustada: 0, ubicInicial: 'PISO-ALM-404-000', ubicFinal: 'NAV-TDA-004-002', timestamp: now - 1.2 * hour, usuario: 'CRODRIGUEZ' },
+        // Consumido total desde PISO
+        { tienda: '404', pantalla: 'RF_REPONER_RESERVA', lpn: 'C404100004', sku: '20058104', cantOriginal: 8, cantAjustada: -8, ubicInicial: 'PISO-ALM-404-000', ubicFinal: 'TDA-HOME-TOTAL-001', timestamp: now - 0.8 * hour, usuario: 'JPEREZ' },
+        // Movimiento adicional fuera de la base
+        { tienda: '404', pantalla: 'RF_ALMACENAR', lpn: 'C404099988', sku: '20051122', cantOriginal: 10, cantAjustada: 0, ubicInicial: 'PUERTA-404-001-005', ubicFinal: 'TDA-DEC-003-001', timestamp: now - 0.3 * hour, usuario: 'JPEREZ' }
+      ];
+
+      saveToStorage();
+      recalculateAll();
+      showToast('Datos de demostración cargados.', 'success');
+    }
+
+    // =========================================================================
+    // 8. UTILIDADES DE INTERFAZ (TABS, TOASTS, MODALES)
+    // =========================================================================
+    function switchTab(tabName) {
+      document.querySelectorAll('.tab-view').forEach(el => el.classList.add('hidden'));
+      document.getElementById(`view-${tabName}`).classList.remove('hidden');
+
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('bg-blue-600', 'text-white', 'shadow-xs', 'font-bold');
+        btn.classList.add('text-slate-600', 'hover:bg-slate-200/70', 'font-semibold');
+      });
+
+      const activeBtn = document.getElementById(`tab-${tabName}`);
+      activeBtn.classList.remove('text-slate-600', 'hover:bg-slate-200/70', 'font-semibold');
+      activeBtn.classList.add('bg-blue-600', 'text-white', 'shadow-xs', 'font-bold');
+    }
+
+    function toggleUploadPanel() {
+      const panel = document.getElementById('uploadPanel');
+      panel.classList.toggle('hidden');
+    }
+
+    function escapeHtml(str) {
+      if (str === null || str === undefined) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function showToast(message, type = 'info') {
+      const container = document.getElementById('toastContainer');
+      const colors = {
+        success: 'bg-slate-900 border-emerald-500 text-white',
+        error: 'bg-rose-950 border-rose-500 text-white',
+        info: 'bg-slate-900 border-blue-500 text-white'
+      };
+      const iconNames = {
+        success: 'check-circle',
+        error: 'alert-circle',
+        info: 'info'
+      };
+
+      const toast = document.createElement('div');
+      toast.className = `pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl border-l-4 shadow-xl text-xs font-medium animate-fade ${colors[type] || colors.info}`;
+      toast.innerHTML = `
+        <i data-lucide="${iconNames[type] || 'info'}" class="w-4 h-4 shrink-0"></i>
+        <span class="flex-1">${escapeHtml(message)}</span>
+      `;
+      container.appendChild(toast);
+      lucide.createIcons();
+
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transition = 'opacity 0.3s ease';
+        setTimeout(() => toast.remove(), 300);
+      }, 4000);
+    }
+
+    function showConfirmModal(title, message, onConfirm) {
+      const modal = document.getElementById('confirmModal');
+      document.getElementById('confirmTitle').textContent = title;
+      document.getElementById('confirmMessage').textContent = message;
+
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+
+      const close = () => {
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+      };
+
+      document.getElementById('confirmCancelBtn').onclick = close;
+      document.getElementById('confirmAcceptBtn').onclick = () => {
+        close();
+        onConfirm();
+      };
+    }
+  </script>
+</body>
+</html>
